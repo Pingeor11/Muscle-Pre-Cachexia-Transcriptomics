@@ -1,0 +1,9 @@
+# Real data — must never be committed (see project data handling policy)
+Muscle_Male_Female_All.xlsx
+restructured/
+
+# OS / editor junk
+.DS_Store
+.ipynb_checkpoints/
+__pycache__/
+*.pyc

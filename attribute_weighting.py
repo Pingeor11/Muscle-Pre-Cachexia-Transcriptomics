@@ -4,8 +4,20 @@ from skrebate import ReliefF
 import pandas as pd
 import numpy as np
 
-def weight_by_information_gain(X: pd.DataFrame,y: pd.Series):
-    scores = mutual_info_classif(X, y, discrete_features = False, n_neighbors = 3, random_state = 51)
+def default_n_neighbors(y: pd.Series, cap: int = 3) -> int:
+    """Neighbor count for IG/Relief, capped at `cap` but never >= the smaller class size.
+
+    The 3 used at n=8 (4 SHAM/4 C26) breaks down on smaller resamples (e.g. stability
+    selection's leave-one-pair-out 3v3 folds), where n_neighbors=3 exceeds what a class
+    of 3 can supply once ReliefF/mutual_info_classif exclude the point itself.
+    """
+    min_class_size = y.value_counts().min()
+    return max(1, min(cap, min_class_size - 1))
+
+def weight_by_information_gain(X: pd.DataFrame, y: pd.Series, n_neighbors: int | None = None):
+    if n_neighbors is None:
+        n_neighbors = default_n_neighbors(y)
+    scores = mutual_info_classif(X, y, discrete_features = False, n_neighbors = n_neighbors, random_state = 51)
 
     return pd.Series(data = scores, index = X.columns)
 
@@ -184,8 +196,10 @@ def weight_by_symmetric_uncertainty(X: pd.DataFrame, y: pd.Series) -> pd.Series:
     return pd.Series(scores)
 
 
-def weight_by_relief(X: pd.DataFrame, y: pd.Series) -> pd.Series:
-    relief = ReliefF(n_neighbors = 3, categorical_threshold = 0)
+def weight_by_relief(X: pd.DataFrame, y: pd.Series, n_neighbors: int | None = None) -> pd.Series:
+    if n_neighbors is None:
+        n_neighbors = default_n_neighbors(y)
+    relief = ReliefF(n_neighbors = n_neighbors, categorical_threshold = 0)
     relief.fit(X.values, y.values)
     scores = relief.feature_importances_
     return pd.Series(data=scores, index = X.columns)
@@ -216,3 +230,62 @@ def run_attribute_weighting(X: pd.DataFrame, y: pd.Series) -> pd.DataFrame:
     result["Selected"] = result["WeightSum"] > 5
 
     return result.sort_values("WeightSum", ascending=False)
+
+def leave_one_pair_out_splits(y: pd.Series) -> list[pd.Index]:
+    """All folds that drop one sample from each of the two classes.
+
+    For the 4 SHAM / 4 C26 design this exhaustively enumerates all 4*4=16 balanced
+    3v3 subsets, rather than relying on random bootstrap resampling at n=8.
+    """
+    classes = y.unique()
+    if len(classes) != 2:
+        raise ValueError("leave_one_pair_out_splits expects a binary label")
+
+    idx_by_class = {c: y.index[y == c] for c in classes}
+
+    splits = []
+    for drop_a in idx_by_class[classes[0]]:
+        for drop_b in idx_by_class[classes[1]]:
+            splits.append(y.index.difference([drop_a, drop_b]))
+    return splits
+
+def run_stability_selection(
+    X: pd.DataFrame,
+    y: pd.Series,
+    splits: list[pd.Index] | None = None,
+    top_k: tuple[int, ...] = (25, 50),
+) -> pd.DataFrame:
+    """Rerun the full weighting pipeline on each leave-one-pair-out fold.
+
+    StabilityScore (fraction of folds where WeightSum > 5) turned out not to
+    discriminate well on synthetic data — that cutoff is so lenient at n=8 that most
+    genes clear it in most folds regardless of whether they carry real signal. The
+    TopKFreq columns (fraction of folds where the gene's Rank fell in the top k) were
+    the metric that actually separated the synthetic-injected signal genes from noise,
+    so use those, not StabilityScore, to build a shortlist.
+    """
+    if splits is None:
+        splits = leave_one_pair_out_splits(y)
+
+    n_splits = len(splits)
+    selected_counts = pd.Series(0.0, index=X.columns)
+    weight_sum_totals = pd.Series(0.0, index=X.columns)
+    rank_totals = pd.Series(0.0, index=X.columns)
+    top_k_counts = {k: pd.Series(0.0, index=X.columns) for k in top_k}
+
+    for keep_idx in splits:
+        fold_result = run_attribute_weighting(X.loc[keep_idx], y.loc[keep_idx])
+        selected_counts = selected_counts.add(fold_result["Selected"].astype(float), fill_value=0.0)
+        weight_sum_totals = weight_sum_totals.add(fold_result["WeightSum"], fill_value=0.0)
+        rank_totals = rank_totals.add(fold_result["Rank"], fill_value=0.0)
+        for k in top_k:
+            top_k_counts[k] = top_k_counts[k].add((fold_result["Rank"] <= k).astype(float), fill_value=0.0)
+
+    stability = pd.DataFrame({
+        "StabilityScore": selected_counts / n_splits,
+        "MeanWeightSum": weight_sum_totals / n_splits,
+        "MeanRank": rank_totals / n_splits,
+        **{f"Top{k}Freq": top_k_counts[k] / n_splits for k in top_k},
+    })
+    sort_col = f"Top{top_k[0]}Freq"
+    return stability.sort_values([sort_col, "MeanRank"], ascending=[False, True])

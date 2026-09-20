@@ -2,6 +2,9 @@
 Muscle_Male_Female_All.xlsx
 restructured/
 
+# Public external datasets — regeneratable from their GEO accession, kept local only
+GSE276018_*
+
 # OS / editor junk
 .DS_Store
 .ipynb_checkpoints/

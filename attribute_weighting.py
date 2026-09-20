@@ -1,30 +1,37 @@
-from sklearn.feature_selection import mutual_info_classif, chi2
 from sklearn.tree import DecisionTreeClassifier
+from scipy.stats import chi2_contingency
 from skrebate import ReliefF
 import pandas as pd
 import numpy as np
 
 def default_n_neighbors(y: pd.Series, cap: int = 3) -> int:
-    """Neighbor count for IG/Relief, capped at `cap` but never >= the smaller class size.
+    """Neighbor count for Relief, capped at `cap` but never >= the smaller class size.
 
     The 3 used at n=8 (4 SHAM/4 C26) breaks down on smaller resamples (e.g. stability
     selection's leave-one-pair-out 3v3 folds), where n_neighbors=3 exceeds what a class
-    of 3 can supply once ReliefF/mutual_info_classif exclude the point itself.
+    of 3 can supply once ReliefF excludes the point itself.
     """
     min_class_size = y.value_counts().min()
     return max(1, min(cap, min_class_size - 1))
 
-def weight_by_information_gain(X: pd.DataFrame, y: pd.Series, n_neighbors: int | None = None):
-    if n_neighbors is None:
-        n_neighbors = default_n_neighbors(y)
-    scores = mutual_info_classif(X, y, discrete_features = False, n_neighbors = n_neighbors, random_state = 51)
+def weight_by_chi_squared(X: pd.DataFrame, y: pd.Series) -> pd.Series:
+    """Chi-squared statistic on the same MDL-discretized bins used by IG/IGRatio/SU.
 
-    return pd.Series(data = scores, index = X.columns)
-
-def weight_by_chi_squared(X: pd.DataFrame,y: pd.Series):
-    chi_2_stats = chi2(X, y)[0]
-
-    return pd.Series(data = chi_2_stats, index = X.columns)
+    Chi-squared needs a bins-vs-label contingency table, not raw continuous (possibly
+    negative) expression values — sklearn's `chi2()` assumes non-negative count-like
+    features, which doesn't hold here and doesn't match how RapidMiner's Weight by
+    Chi Squared Statistic operator works (it discretizes numeric attributes first).
+    """
+    scores = {}
+    for gene in X.columns:
+        bins = mdl_discretize(X[gene], y)
+        contingency = pd.crosstab(bins, y)
+        if contingency.shape[0] < 2 or contingency.shape[1] < 2:
+            scores[gene] = 0.0
+            continue
+        chi2_stat, _, _, _ = chi2_contingency(contingency, correction=False)
+        scores[gene] = chi2_stat
+    return pd.Series(scores)
 
 def weight_by_gini_index(X,y):
     scores = {}
@@ -45,7 +52,7 @@ def majority_or_default(labels: pd.Series, default):
 
 def weight_by_rule(X: pd.DataFrame, y: pd.Series):
     scores = {}
-    overall_majority = 0
+    overall_majority = majority_or_default(y, sorted(y.unique())[0])
     for gene in X.columns:
         values = X[gene]
         sorted_vals = pd.Series(values.unique()).sort_values()
@@ -161,6 +168,22 @@ def weighted_entropy_across_bins(y: pd.Series, bins: pd.Series) -> float:
         weight = mask.sum() / n
         weighted += weight * entropy(y[mask])
     return weighted
+
+def weight_by_information_gain(X: pd.DataFrame, y: pd.Series) -> pd.Series:
+    """Entropy-based IG on the same MDL-discretized bins as IGRatio/SU below.
+
+    Kept consistent with weight_by_information_gain_ratio/weight_by_symmetric_uncertainty
+    deliberately: those are both this same discretized-entropy IG divided by an entropy
+    term, matching RapidMiner's Weight by Information Gain family. A continuous kNN-based
+    estimator (e.g. sklearn's mutual_info_classif) is a different algorithm and noisier
+    at n=8, so it isn't used here.
+    """
+    scores = {}
+    h_label = entropy(y)
+    for gene in X.columns:
+        bins = mdl_discretize(X[gene], y)
+        scores[gene] = h_label - weighted_entropy_across_bins(y, bins)
+    return pd.Series(scores)
 
 def weight_by_information_gain_ratio(X: pd.DataFrame, y: pd.Series) -> pd.Series:
     scores = {}

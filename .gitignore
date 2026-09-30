@@ -4,9 +4,17 @@ restructured/
 
 # Public external datasets — regeneratable from their GEO accession, kept local only
 GSE276018_*
+GSE290937_*
+GSE222317_*
+GSE114820_*
 
 # OS / editor junk
 .DS_Store
+~$*
 .ipynb_checkpoints/
 __pycache__/
 *.pyc
+
+# Claude Code project instructions — local only, never commit
+CLAUDE.md
+.claude/

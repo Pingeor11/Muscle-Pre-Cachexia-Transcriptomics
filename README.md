@@ -6,12 +6,12 @@ University of Melbourne). The project identifies conserved transcriptomic
 signatures of pre-cachectic skeletal muscle in the C26 mouse model of cancer
 cachexia, analysed separately by sex.
 
-Three independent feature-selection methods are run on the lab's own n=8
+Two independent feature-selection methods are run on the lab's own n=8
 (4 SHAM, 4 C26, per sex) RNA-seq dataset. These are attribute weighting
-(ReliefF), Random Forest, and LASSO/Elastic Net, each under leave-one-out
-cross-validation. The resulting shortlists are compared against one another,
-and a curated Elastic Net gene set is validated against an independent
-public cohort (GSE276018).
+(ReliefF) and LASSO/Elastic Net, each under leave-one-out cross-validation.
+The resulting shortlists are compared against one another, and a curated
+Elastic Net gene set is validated against an independent public cohort
+(GSE276018).
 
 ## Repo structure
 
@@ -24,17 +24,15 @@ Run in this order.
 2. **`Feature_Weighting.ipynb`** runs attribute weighting (ReliefF,
    decision-tree importance) with leave-one-pair-out stability selection
    (`attribute_weighting.py`).
-3. **`RandomForest_Feature_Importance.ipynb`** runs LOOCV Random Forest
-   feature importance (`random_forest_importance.py`).
-4. **`Lasso_Feature_Selection.ipynb`** runs LOOCV LASSO and Elastic Net
+3. **`Lasso_Feature_Selection.ipynb`** runs LOOCV LASSO and Elastic Net
    feature selection, an exact permutation test of LOOCV accuracy, and
    external validation of a curated Elastic Net gene set against GSE276018
    (`lasso_selection.py`).
 
 Supporting modules
 
-- `lasso_selection.py`, `attribute_weighting.py`, `random_forest_importance.py`
-  hold the reusable pipeline logic each notebook imports.
+- `lasso_selection.py` and `attribute_weighting.py` hold the reusable
+  pipeline logic each notebook imports.
 - `synthetic_data.py` generates a synthetic expression matrix matching the
   real data's structure (column names, dtypes, label categories, value
   ranges), used for developing and testing pipeline code without real

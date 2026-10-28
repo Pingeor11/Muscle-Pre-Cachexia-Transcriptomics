@@ -25,3 +25,5 @@ Pooled_Discovery_Analysis.ipynb
 NOTES_Prostate_IMF_Paper.md
 PLAN_Attribute_Weighting.md
 batch_correction.py
+RandomForest_Feature_Importance.ipynb
+random_forest_importance.py

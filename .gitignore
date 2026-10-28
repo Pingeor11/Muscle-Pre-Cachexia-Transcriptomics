@@ -18,3 +18,10 @@ __pycache__/
 # Claude Code project instructions — local only, never commit
 CLAUDE.md
 .claude/
+
+# Exploratory / in-progress work, not part of the final paper pipeline
+External_Dataset_Pooling.ipynb
+Pooled_Discovery_Analysis.ipynb
+NOTES_Prostate_IMF_Paper.md
+PLAN_Attribute_Weighting.md
+batch_correction.py

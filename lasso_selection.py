@@ -19,6 +19,13 @@ def cpm_log_normalize(X: pd.DataFrame) -> pd.DataFrame:
     nominally "raw counts", and a linear model's scale-sensitive penalty
     shouldn't be picking up that technical difference as if it were biology.
     Standard RNA-seq practice, not specific to any one model here.
+
+    IMPORTANT: call this on the full measured gene panel, before subsetting to
+    genes of interest — not after. The "library size" denominator is the sum
+    across whatever columns of X are passed in, so normalizing an already-small
+    subset (e.g. just your top 15 genes) gives a different, wrong answer than
+    normalizing the full panel and then subsetting — found this the hard way
+    when it silently reversed a direction-concordance result.
     """
     library_sizes = X.sum(axis=1)
     cpm = X.div(library_sizes, axis=0) * 1e6
@@ -147,27 +154,48 @@ def hedges_g(X: pd.DataFrame, y: pd.Series) -> pd.Series:
     small_sample_correction = 1 - (3 / (4 * (n1 + n0) - 9))
     return cohens_d * small_sample_correction
 
-def permutation_test_accuracy(X: pd.DataFrame, y: pd.Series, C: float, l1_ratio: float = 1.0, random_state: int = 51):
-    """Exact permutation-null test for LOOCV accuracy.
+def permutation_test_accuracy(
+    X: pd.DataFrame, y: pd.Series, C: float, l1_ratio: float = 1.0,
+    n_permutations: int | None = None, random_state: int = 51,
+):
+    """Permutation-null test for LOOCV accuracy.
 
-    At n=8 with a balanced 4/4 label split, there are only C(8,4)=70 possible
-    balanced label assignments — few enough to enumerate all of them exactly,
-    rather than randomly sampling a subset (an approximate test). Reruns the full
-    LOOCV pipeline once per permutation, using the same C/l1_ratio as the real
-    analysis (never re-tuned per permutation — that would be circular).
+    `n_permutations=None` (default): exact test, enumerating every possible balanced
+    label assignment. Only feasible for small n — at n=8 with a 4/4 split there are
+    just C(8,4)=70 of them. For larger n (e.g. after pooling datasets), pass
+    `n_permutations` to randomly sample that many balanced relabelings instead — an
+    approximate but still valid test, since exact enumeration becomes combinatorially
+    infeasible well before n reaches the low dozens.
+
+    Either way, reruns the full LOOCV pipeline once per permutation, using the same
+    C/l1_ratio as the real analysis (never re-tuned per permutation — that would be
+    circular).
 
     Returns (observed_accuracy, null_accuracies, p_value), where p_value is the
-    fraction of all 70 balanced label assignments — including the true one — that
-    achieve accuracy at least as high as the true labels' accuracy.
+    fraction of permutations — including the true one, which is always included —
+    that achieve accuracy at least as high as the true labels' accuracy.
     """
     n = len(y)
     n_pos = int(y.sum())
     true_label_tuple = tuple(y.values)
+    true_positions = tuple(sorted(np.where(y.values == 1)[0]))
+
+    if n_permutations is None:
+        label_combos = list(combinations(range(n), n_pos))
+    else:
+        rng = np.random.default_rng(random_state)
+        seen = {true_positions}
+        label_combos = [true_positions]
+        while len(label_combos) < n_permutations:
+            combo = tuple(sorted(rng.choice(n, size=n_pos, replace=False)))
+            if combo not in seen:
+                seen.add(combo)
+                label_combos.append(combo)
 
     null_accuracies = []
     observed_accuracy = None
 
-    for pos_combo in combinations(range(n), n_pos):
+    for pos_combo in label_combos:
         permuted = np.zeros(n, dtype=int)
         for i in pos_combo:
             permuted[i] = 1

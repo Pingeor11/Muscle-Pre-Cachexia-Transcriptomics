@@ -272,6 +272,34 @@ def leave_one_pair_out_splits(y: pd.Series) -> list[pd.Index]:
             splits.append(y.index.difference([drop_a, drop_b]))
     return splits
 
+def random_subsample_splits(
+    y: pd.Series, n_repeats: int = 40, drop_fraction: float = 0.25, random_state: int = 51
+) -> list[pd.Index]:
+    """Repeated stratified random subsampling — each split drops ~drop_fraction of each class.
+
+    Generalizes leave_one_pair_out_splits to sample sizes where exhaustively enumerating
+    every drop-one-pair combination is too slow, and too small a perturbation to be a
+    meaningful stress test (e.g. after pooling several datasets: dropping 1 pair out of
+    8 samples is a 25% perturbation, dropping 1 pair out of 30 is under 10%). Class
+    balance is preserved in every split, same principle as leave_one_pair_out_splits.
+    """
+    rng = np.random.default_rng(random_state)
+    classes = y.unique()
+    if len(classes) != 2:
+        raise ValueError("random_subsample_splits expects a binary label")
+
+    idx_by_class = {c: y.index[y == c].to_numpy() for c in classes}
+
+    splits = []
+    for _ in range(n_repeats):
+        keep_idx = []
+        for idx in idx_by_class.values():
+            n_drop = max(1, round(len(idx) * drop_fraction))
+            drop = rng.choice(idx, size=n_drop, replace=False)
+            keep_idx.append(np.setdiff1d(idx, drop))
+        splits.append(pd.Index(np.concatenate(keep_idx)))
+    return splits
+
 def run_stability_selection(
     X: pd.DataFrame,
     y: pd.Series,
